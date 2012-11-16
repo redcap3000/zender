@@ -34,9 +34,6 @@
 class zender{
 
 	public function __construct(){
-		$this->queue_connect();
-	}
-	function queue_connect(){
 		if(!isset($this->_queue))
 			$this->_queue = new ZendJobQueue();
 	}
@@ -61,36 +58,49 @@ class zender{
 		// no schedules to remove
 		return false;
 	}
-	
-	function create_job($url=null,$name,$persistent=false,$schedule="00,15,30,45 * * *"){
-		$this->queue_connect();
+	protected function create_job($url=null,$name,$params=array(),$persistent=false,$schedule="00,15,30,45 * * *"){
 		// check jobs list for URL
 		$r = $this->_queue->getJobsList(array('name'=>$name,'script'=>$url) );
 		if($r == null){
-			// attempt to randomize etc. so we dont have jobs running every 15 min and causing server slow downs when they are running
-			// create http job does not like it if there is not a parameter object that is not an assoc. array
-			// you cannot remove zend jobs that are scheduled and persistent from the web ui.
-			$job_id = $this->_queue->createHttpJob($url,array('p'=>''), array ('name'=>$name,'persistent'=> ($persistent == 'fetch' ? false: $persistent), "schedule" => "00,15,30,45 * * *" ) );
-			// go ahead and get the contents and return if job id..
-			// check for job's existance may not want to return this object... it will more than likely not have the output immediately..
+			$job_id = $this->_queue->createHttpJob($url,$params, array ('name'=>$name,'persistent'=> ($persistent == 'fetch' ? false: $persistent), "schedule" => $schedule ) );
 		}else{
 		// job exists log that we are attempting to create a job that already exists ?
 			;
 		}
-
 		if(isset($job_id)){	
 		// return the 'actual call' via filegetcontents?
 			if($persistent== 'fetch'){
 			// 'fetch' is designed to immediately return something in addition to 'creating' a new schedule
 			//	echo '<script type="text/javascript">console.log("fetching")</script>';
-				return json_decode(file_get_contents($url)); 
+			// encode the params array too! possibly search uri for existing question mark and replace...question mark with and
+				return json_decode(file_get_contents($url .( !empty($params) ? '?'. http_build_query($params) :''))); 
 			}
 			// add check of getJobStatus to return the value on create_job? allow
 			return $this->_queue->getJobStatus($job_id);		
-			}		
+		}
 	}
 	
-	function get_job($query_array  = null,$output = 'json'){
+	
+	protected function do_job($name,$query,$domain='',$params=false){
+	// domain refers to the calling function to store multiple responses per each
+	// name, needs a bit more work as additional response functions are supported
+	
+	// a not-so elegant solution if a param is not sent, cannot create job schedules on open shift that
+	// do not have the second parameter set
+	    if(empty($param) || !is_array($param))
+	    	$param = array(''=>'');
+	    
+	    if($result = $this->get_job($domain . '_' . $name))
+	    // return latest exising valid job from zend
+	    	return $result;
+	     // build the query, use prefetch...
+	     // this should not create the same job per each 'user' ... 
+	    $this->create_job($query,$domain . '_' . $name,$params,true);
+		return false;
+	}
+	
+	
+	protected function get_job($query_array  = null,$output = 'json'){
 		// ways to strip the header from the output
 		$output = ($output == 'json'? "[" : false);
 		if(!is_array($query_array) && !is_object($query_array) && $query_array != null){
@@ -99,7 +109,6 @@ class zender{
 			// provide with 'safe' default values to lookup by a 'name' - then we attempt to get the 'latest' by sorting by id, descending
 				$query_array = array('name'=> $query_array,'status'=> 1<< ZendJobQueue::STATUS_COMPLETED,'sort_by'=> ZendJobQueue::SORT_BY_ID ,'sort_direction'=> ZendJobQueue::SORT_DESC,'count'=>1);	
 		}
-		$this->queue_connect();
 		// getJobsList doesn't support second parameter (to limit overall output) if/when count is provided?
 		if($r = $this->_queue->getJobsList($query_array)){
 			$r = $r[0]['output'];
@@ -107,9 +116,9 @@ class zender{
 			if($output != false){
 			// decode and strip json content (iuf header has a '[' i'm screweeed
 				$r = explode($output,$r,2) and $r = $r[1];
-				$r = json_decode($output.$r);				
+				$r = json_decode($output.$r,true);				
 				}
-
+	
 			return $r	;
 		}
 		return false;
